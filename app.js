@@ -29,6 +29,7 @@ const state = {
   supabaseProblem: getSupabaseProblem(),
   remoteReady: false,
   saving: false,
+  lastRemoteCount: 0,
 };
 
 const els = {
@@ -91,13 +92,12 @@ async function init() {
     showToast("共有レシピを読み込みました");
   }
 
-  state.selectedId = state.selectedId ?? state.recipes[0]?.id ?? null;
-  if (!state.selectedId) createRecipe(false);
-  render();
-
   if (state.supabase) {
     await loadRemoteRecipes();
   } else {
+    state.selectedId = state.selectedId ?? state.recipes[0]?.id ?? null;
+    if (!state.selectedId) createRecipe(false);
+    render();
     updateSyncStatus("local");
   }
 }
@@ -164,6 +164,7 @@ async function loadRemoteRecipes() {
 
   state.remoteReady = true;
   const remoteRecipes = (data || []).map(normalizeRecipe);
+  state.lastRemoteCount = remoteRecipes.length;
   state.recipes = mergeRecipes(remoteRecipes, state.recipes).map((recipe) => ({
     ...recipe,
     workspace_id: state.workspaceId,
@@ -171,6 +172,7 @@ async function loadRemoteRecipes() {
   saveLocalRecipes();
   await syncAllLocalRecipes();
   state.selectedId = state.recipes[0]?.id ?? null;
+  if (!state.selectedId) createRecipe(false);
   render();
   updateSyncStatus("ready");
 }
@@ -514,16 +516,21 @@ function getWorkspaceId() {
 
 function updateSyncStatus(status) {
   const localMessage = state.supabaseProblem || "URLとPublishable keyを入れるまでは、このブラウザだけに保存します。";
+  const readyMessage = `DBとこのブラウザに保存します。レシピ帳ID: ${shortWorkspaceId(state.workspaceId)} / DBから${state.lastRemoteCount}件取得`;
   const labels = {
     local: ["Supabase未設定", localMessage],
     loading: ["読み込み中", "Supabaseからレシピを取得しています。"],
     saving: ["保存中", "Supabaseへ変更を送っています。"],
-    ready: ["Supabase接続中", "DBとこのブラウザに保存します。共有リンクで同じレシピ帳を開けます。"],
+    ready: ["Supabase接続中", readyMessage],
     error: ["接続エラー", "テーブル名、RLSポリシー、URL、Publishable keyを確認してください。"],
   };
   const [title, message] = labels[status];
   els.syncTitle.textContent = title;
   els.syncStatus.textContent = message;
+}
+
+function shortWorkspaceId(id) {
+  return id ? id.slice(0, 8) : "未作成";
 }
 
 function today() {
