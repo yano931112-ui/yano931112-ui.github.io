@@ -1,5 +1,6 @@
 const storageKey = "recipe-daybook.v1";
 const workspaceKey = "recipe-daybook.workspace-id";
+const publicWorkspaceId = "00000000-0000-4000-8000-000000000001";
 
 const sampleRecipes = [
   {
@@ -67,12 +68,7 @@ async function init() {
   bindEvents();
   state.recipes = loadLocalRecipes();
 
-  const sharedWorkspace = readSharedWorkspace();
-  if (sharedWorkspace) {
-    state.workspaceId = sharedWorkspace;
-    localStorage.setItem(workspaceKey, sharedWorkspace);
-    state.recipes = [];
-    state.selectedId = null;
+  if (location.hash.startsWith("#workspace=")) {
     history.replaceState(null, "", location.pathname);
   }
 
@@ -151,7 +147,6 @@ async function loadRemoteRecipes() {
   const { data, error } = await state.supabase
     .from("recipes")
     .select("*")
-    .eq("workspace_id", state.workspaceId)
     .order("date", { ascending: false })
     .order("updated_at", { ascending: false });
 
@@ -450,17 +445,12 @@ function formData() {
 
 function makeShareUrl(recipe) {
   if (state.remoteReady) {
-    return `${location.origin}${location.pathname}#workspace=${encodeURIComponent(state.workspaceId)}`;
+    return `${location.origin}${location.pathname}`;
   }
 
   const shareRecipe = normalizeRecipe({ ...recipe, id: undefined });
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(shareRecipe))));
   return `${location.origin}${location.pathname}#recipe=${encoded}`;
-}
-
-function readSharedWorkspace() {
-  const match = location.hash.match(/^#workspace=(.+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function readSharedRecipe() {
@@ -506,17 +496,15 @@ function mergeRecipes(current, incoming) {
 }
 
 function getWorkspaceId() {
-  let id = localStorage.getItem(workspaceKey);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(workspaceKey, id);
-  }
+  const configId = window.RECIPE_DAYBOOK_SUPABASE?.workspaceId;
+  const id = configId || publicWorkspaceId;
+  localStorage.setItem(workspaceKey, id);
   return id;
 }
 
 function updateSyncStatus(status) {
   const localMessage = state.supabaseProblem || "URLとPublishable keyを入れるまでは、このブラウザだけに保存します。";
-  const readyMessage = `DBとこのブラウザに保存します。レシピ帳ID: ${shortWorkspaceId(state.workspaceId)} / DBから${state.lastRemoteCount}件取得`;
+  const readyMessage = `DBとこのブラウザに保存します。どのブラウザでも同じレシピを開きます。DBから${state.lastRemoteCount}件取得`;
   const labels = {
     local: ["Supabase未設定", localMessage],
     loading: ["読み込み中", "Supabaseからレシピを取得しています。"],
@@ -527,10 +515,6 @@ function updateSyncStatus(status) {
   const [title, message] = labels[status];
   els.syncTitle.textContent = title;
   els.syncStatus.textContent = message;
-}
-
-function shortWorkspaceId(id) {
-  return id ? id.slice(0, 8) : "未作成";
 }
 
 function today() {
