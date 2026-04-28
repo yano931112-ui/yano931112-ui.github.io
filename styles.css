@@ -122,6 +122,35 @@ button:hover,
   gap: 8px;
 }
 
+.sync-panel {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.sync-panel strong {
+  display: block;
+  font-size: 14px;
+}
+
+.sync-panel p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sync-panel button {
+  min-width: 56px;
+  padding: 0 10px;
+}
+
 .import-button {
   display: grid;
   place-items: center;

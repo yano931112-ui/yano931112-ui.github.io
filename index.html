@@ -17,6 +17,14 @@
           </div>
         </div>
 
+        <div class="sync-panel">
+          <div>
+            <strong id="syncTitle">Supabase未設定</strong>
+            <p id="syncStatus">supabase-config.js にURLとanon keyを入れるとDB保存になります。</p>
+          </div>
+          <button id="syncBtn" type="button">同期</button>
+        </div>
+
         <div class="toolbar">
           <button class="primary" id="newRecipeBtn" type="button">新規</button>
           <button id="exportBtn" type="button">書き出し</button>
@@ -116,6 +124,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./supabase-config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

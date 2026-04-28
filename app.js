@@ -1,8 +1,10 @@
 const storageKey = "recipe-daybook.v1";
+const workspaceKey = "recipe-daybook.workspace-id";
 
 const sampleRecipes = [
   {
     id: crypto.randomUUID(),
+    workspace_id: getWorkspaceId(),
     date: today(),
     title: "鶏とトマトのしょうが煮",
     servings: 2,
@@ -12,16 +14,20 @@ const sampleRecipes = [
     steps: "1. 鶏肉とトマトを食べやすく切る\n2. 鶏肉を焼き、しょうがを加える\n3. トマトと調味料を入れて10分煮る",
     notes: "トマトの酸味が強い日は、みりんを少し足す。",
     favorite: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   },
 ];
 
 const state = {
-  recipes: loadRecipes(),
+  recipes: [],
   selectedId: null,
   filter: "all",
   search: "",
+  workspaceId: getWorkspaceId(),
+  supabase: createSupabaseClient(),
+  remoteReady: false,
+  saving: false,
 };
 
 const els = {
@@ -36,6 +42,9 @@ const els = {
   favoriteBtn: document.querySelector("#favoriteBtn"),
   shareBtn: document.querySelector("#shareBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
+  syncBtn: document.querySelector("#syncBtn"),
+  syncTitle: document.querySelector("#syncTitle"),
+  syncStatus: document.querySelector("#syncStatus"),
   toast: document.querySelector("#toast"),
   heroTitle: document.querySelector("#heroTitle"),
   fields: {
@@ -52,32 +61,55 @@ const els = {
 
 init();
 
-function init() {
-  const sharedRecipe = readSharedRecipe();
-  if (sharedRecipe) {
-    const imported = { ...sharedRecipe, id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    state.recipes.unshift(imported);
-    state.selectedId = imported.id;
-    saveRecipes();
+async function init() {
+  bindEvents();
+  state.recipes = loadLocalRecipes();
+
+  const sharedWorkspace = readSharedWorkspace();
+  if (sharedWorkspace) {
+    state.workspaceId = sharedWorkspace;
+    localStorage.setItem(workspaceKey, sharedWorkspace);
+    state.recipes = [];
+    state.selectedId = null;
     history.replaceState(null, "", location.pathname);
-    showToast("共有レシピを読み込みました");
-  } else {
-    state.selectedId = state.recipes[0]?.id ?? null;
   }
 
-  bindEvents();
-  if (!state.selectedId) createRecipe();
+  const sharedRecipe = readSharedRecipe();
+  if (sharedRecipe) {
+    const imported = {
+      ...sharedRecipe,
+      id: crypto.randomUUID(),
+      workspace_id: state.workspaceId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    state.recipes.unshift(imported);
+    state.selectedId = imported.id;
+    saveLocalRecipes();
+    history.replaceState(null, "", location.pathname);
+    showToast("共有レシピを読み込みました");
+  }
+
+  state.selectedId = state.selectedId ?? state.recipes[0]?.id ?? null;
+  if (!state.selectedId) createRecipe(false);
   render();
+
+  if (state.supabase) {
+    await loadRemoteRecipes();
+  } else {
+    updateSyncStatus("local");
+  }
 }
 
 function bindEvents() {
-  els.newRecipeBtn.addEventListener("click", createRecipe);
+  els.newRecipeBtn.addEventListener("click", () => createRecipe(true));
   els.form.addEventListener("submit", saveCurrentRecipe);
   els.favoriteBtn.addEventListener("click", toggleFavorite);
   els.shareBtn.addEventListener("click", shareCurrentRecipe);
   els.deleteBtn.addEventListener("click", deleteCurrentRecipe);
   els.exportBtn.addEventListener("click", exportRecipes);
   els.importInput.addEventListener("change", importRecipes);
+  els.syncBtn.addEventListener("click", loadRemoteRecipes);
   els.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
     renderList();
@@ -86,22 +118,112 @@ function bindEvents() {
   els.favoriteFilter.addEventListener("click", () => setFilter("favorite"));
 }
 
-function loadRecipes() {
+function createSupabaseClient() {
+  const config = window.RECIPE_DAYBOOK_SUPABASE;
+  const url = config?.url;
+  const anonKey = config?.anonKey;
+  const hasPlaceholders = !url || !anonKey || url.includes("YOUR_") || anonKey.includes("YOUR_");
+
+  if (hasPlaceholders || !window.supabase) return null;
+  return window.supabase.createClient(url, anonKey);
+}
+
+async function loadRemoteRecipes() {
+  if (!state.supabase) {
+    updateSyncStatus("local");
+    showToast("SupabaseのURLとanon keyを設定してください");
+    return;
+  }
+
+  updateSyncStatus("loading");
+  const { data, error } = await state.supabase
+    .from("recipes")
+    .select("*")
+    .eq("workspace_id", state.workspaceId)
+    .order("date", { ascending: false })
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    updateSyncStatus("error");
+    showToast("Supabaseから読み込めませんでした");
+    return;
+  }
+
+  state.remoteReady = true;
+  const remoteRecipes = (data || []).map(normalizeRecipe);
+  state.recipes = mergeRecipes(remoteRecipes, state.recipes).map((recipe) => ({
+    ...recipe,
+    workspace_id: state.workspaceId,
+  }));
+  saveLocalRecipes();
+  await syncAllLocalRecipes();
+  state.selectedId = state.recipes[0]?.id ?? null;
+  render();
+  updateSyncStatus("ready");
+}
+
+async function syncAllLocalRecipes() {
+  if (!state.remoteReady || !state.recipes.length) return;
+  const { error } = await state.supabase.from("recipes").upsert(state.recipes, { onConflict: "id" });
+  if (error) {
+    console.error(error);
+    updateSyncStatus("error");
+    showToast("Supabaseへの同期に失敗しました");
+  }
+}
+
+function loadLocalRecipes() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    return Array.isArray(saved) && saved.length ? saved : sampleRecipes;
+    return Array.isArray(saved) && saved.length ? saved.map(normalizeRecipe) : sampleRecipes;
   } catch {
     return sampleRecipes;
   }
 }
 
-function saveRecipes() {
+function saveLocalRecipes() {
   localStorage.setItem(storageKey, JSON.stringify(state.recipes));
 }
 
-function createRecipe() {
+async function persistRecipe(recipe) {
+  saveLocalRecipes();
+  if (!state.remoteReady) return;
+
+  state.saving = true;
+  updateSyncStatus("saving");
+  const { error } = await state.supabase.from("recipes").upsert(recipe, { onConflict: "id" });
+  state.saving = false;
+
+  if (error) {
+    console.error(error);
+    updateSyncStatus("error");
+    showToast("ローカルには保存しました。Supabase保存に失敗しました");
+    return;
+  }
+
+  updateSyncStatus("ready");
+}
+
+async function removeRemoteRecipe(id) {
+  saveLocalRecipes();
+  if (!state.remoteReady) return;
+
+  updateSyncStatus("saving");
+  const { error } = await state.supabase.from("recipes").delete().eq("id", id).eq("workspace_id", state.workspaceId);
+  if (error) {
+    console.error(error);
+    updateSyncStatus("error");
+    showToast("Supabase側の削除に失敗しました");
+    return;
+  }
+  updateSyncStatus("ready");
+}
+
+function createRecipe(shouldRender) {
   const recipe = {
     id: crypto.randomUUID(),
+    workspace_id: state.workspaceId,
     date: today(),
     title: "",
     servings: 2,
@@ -111,41 +233,46 @@ function createRecipe() {
     steps: "",
     notes: "",
     favorite: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
   state.recipes.unshift(recipe);
   state.selectedId = recipe.id;
-  saveRecipes();
-  render();
-  els.fields.title.focus();
+  saveLocalRecipes();
+  if (shouldRender) {
+    render();
+    els.fields.title.focus();
+  }
 }
 
-function saveCurrentRecipe(event) {
+async function saveCurrentRecipe(event) {
   event.preventDefault();
   const recipe = selectedRecipe();
   if (!recipe) return;
 
-  Object.assign(recipe, formData(), { updatedAt: new Date().toISOString() });
-  saveRecipes();
+  Object.assign(recipe, formData(), {
+    workspace_id: state.workspaceId,
+    updated_at: new Date().toISOString(),
+  });
+  await persistRecipe(recipe);
   render();
-  showToast("保存しました");
+  showToast(state.remoteReady ? "Supabaseに保存しました" : "このブラウザに保存しました");
 }
 
-function toggleFavorite() {
+async function toggleFavorite() {
   const recipe = selectedRecipe();
   if (!recipe) return;
   recipe.favorite = !recipe.favorite;
-  recipe.updatedAt = new Date().toISOString();
-  saveRecipes();
+  recipe.updated_at = new Date().toISOString();
+  await persistRecipe(recipe);
   render();
 }
 
 async function shareCurrentRecipe() {
   const recipe = selectedRecipe();
   if (!recipe) return;
-  Object.assign(recipe, formData(), { updatedAt: new Date().toISOString() });
-  saveRecipes();
+  Object.assign(recipe, formData(), { updated_at: new Date().toISOString() });
+  await persistRecipe(recipe);
 
   const shareUrl = makeShareUrl(recipe);
   const text = `${recipe.title || "無題のレシピ"}\n${shareUrl}`;
@@ -164,15 +291,16 @@ async function shareCurrentRecipe() {
   showToast("共有リンクをコピーしました");
 }
 
-function deleteCurrentRecipe() {
+async function deleteCurrentRecipe() {
   const recipe = selectedRecipe();
   if (!recipe) return;
   const title = recipe.title || "無題のレシピ";
   if (!confirm(`「${title}」を削除しますか？`)) return;
+
   state.recipes = state.recipes.filter((item) => item.id !== recipe.id);
   state.selectedId = state.recipes[0]?.id ?? null;
-  saveRecipes();
-  if (!state.selectedId) createRecipe();
+  if (!state.selectedId) createRecipe(false);
+  await removeRemoteRecipe(recipe.id);
   render();
   showToast("削除しました");
 }
@@ -190,14 +318,15 @@ function importRecipes(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.addEventListener("load", () => {
+  reader.addEventListener("load", async () => {
     try {
       const imported = JSON.parse(String(reader.result));
       if (!Array.isArray(imported)) throw new Error("Invalid recipe file");
-      const cleaned = imported.map(normalizeRecipe);
+      const cleaned = imported.map((recipe) => normalizeRecipe({ ...recipe, workspace_id: state.workspaceId }));
       state.recipes = mergeRecipes(state.recipes, cleaned);
       state.selectedId = cleaned[0]?.id ?? state.selectedId;
-      saveRecipes();
+      saveLocalRecipes();
+      await syncAllLocalRecipes();
       render();
       showToast("レシピを読み込みました");
     } catch {
@@ -265,11 +394,13 @@ function renderList() {
   }
 }
 
-function selectRecipe(id) {
+async function selectRecipe(id) {
   const current = selectedRecipe();
-  if (current) Object.assign(current, formData(), { updatedAt: new Date().toISOString() });
+  if (current) {
+    Object.assign(current, formData(), { updated_at: new Date().toISOString() });
+    await persistRecipe(current);
+  }
   state.selectedId = id;
-  saveRecipes();
   render();
 }
 
@@ -283,7 +414,7 @@ function filteredRecipes() {
         .toLowerCase()
         .includes(state.search);
     })
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.updated_at).localeCompare(String(a.updated_at)));
 }
 
 function selectedRecipe() {
@@ -304,9 +435,18 @@ function formData() {
 }
 
 function makeShareUrl(recipe) {
+  if (state.remoteReady) {
+    return `${location.origin}${location.pathname}#workspace=${encodeURIComponent(state.workspaceId)}`;
+  }
+
   const shareRecipe = normalizeRecipe({ ...recipe, id: undefined });
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(shareRecipe))));
   return `${location.origin}${location.pathname}#recipe=${encoded}`;
+}
+
+function readSharedWorkspace() {
+  const match = location.hash.match(/^#workspace=(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 function readSharedRecipe() {
@@ -321,8 +461,11 @@ function readSharedRecipe() {
 }
 
 function normalizeRecipe(recipe) {
+  const createdAt = recipe.created_at || recipe.createdAt || new Date().toISOString();
+  const updatedAt = recipe.updated_at || recipe.updatedAt || new Date().toISOString();
   return {
     id: recipe.id || crypto.randomUUID(),
+    workspace_id: recipe.workspace_id || state?.workspaceId || getWorkspaceId(),
     date: recipe.date || today(),
     title: recipe.title || "",
     servings: Number(recipe.servings) || 1,
@@ -332,15 +475,42 @@ function normalizeRecipe(recipe) {
     steps: recipe.steps || "",
     notes: recipe.notes || "",
     favorite: Boolean(recipe.favorite),
-    createdAt: recipe.createdAt || new Date().toISOString(),
-    updatedAt: recipe.updatedAt || new Date().toISOString(),
+    created_at: createdAt,
+    updated_at: updatedAt,
   };
 }
 
 function mergeRecipes(current, incoming) {
   const byId = new Map(current.map((recipe) => [recipe.id, recipe]));
-  for (const recipe of incoming) byId.set(recipe.id, recipe);
+  for (const recipe of incoming) {
+    const existing = byId.get(recipe.id);
+    if (!existing || String(recipe.updated_at) >= String(existing.updated_at)) {
+      byId.set(recipe.id, recipe);
+    }
+  }
   return [...byId.values()];
+}
+
+function getWorkspaceId() {
+  let id = localStorage.getItem(workspaceKey);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(workspaceKey, id);
+  }
+  return id;
+}
+
+function updateSyncStatus(status) {
+  const labels = {
+    local: ["Supabase未設定", "URLとanon keyを入れるまでは、このブラウザだけに保存します。"],
+    loading: ["読み込み中", "Supabaseからレシピを取得しています。"],
+    saving: ["保存中", "Supabaseへ変更を送っています。"],
+    ready: ["Supabase接続中", "DBとこのブラウザに保存します。共有リンクで同じレシピ帳を開けます。"],
+    error: ["接続エラー", "テーブル名、RLSポリシー、URL、anon keyを確認してください。"],
+  };
+  const [title, message] = labels[status];
+  els.syncTitle.textContent = title;
+  els.syncStatus.textContent = message;
 }
 
 function today() {
