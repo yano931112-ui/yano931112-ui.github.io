@@ -18,9 +18,9 @@
           </div>
         </div>
 
-        <div class="sync-panel">
+        <div class="sync-panel" id="syncPanel" hidden>
           <div>
-            <strong id="syncTitle">Supabase未設定</strong>
+            <strong id="syncTitle">接続エラー</strong>
             <p id="syncStatus">supabase-config.js にURLとPublishable keyを入れるとDB保存になります。</p>
           </div>
           <button id="syncBtn" type="button">同期</button>
@@ -52,13 +52,18 @@
         <section class="hero-strip" aria-label="今日の記録">
           <div>
             <p class="eyebrow">Daily recipe journal</p>
-            <h2 id="heroTitle">今日のレシピを残す</h2>
+            <h2 id="heroTitle">レシピ一覧</h2>
           </div>
           <div class="hero-plate" aria-hidden="true">
             <span></span>
             <span></span>
             <span></span>
           </div>
+        </section>
+
+        <section class="empty-editor" id="emptyEditor">
+          <h2>レシピを選択してください</h2>
+          <p>左の一覧からレシピを開くか、「新規」から今日のレシピを追加できます。</p>
         </section>
 
         <form class="editor" id="recipeForm">

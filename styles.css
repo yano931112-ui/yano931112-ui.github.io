@@ -134,6 +134,10 @@ button:hover,
   padding: 12px;
 }
 
+.sync-panel[hidden] {
+  display: none;
+}
+
 .sync-panel strong {
   display: block;
   font-size: 14px;
@@ -315,6 +319,31 @@ button:hover,
   background: rgba(255, 255, 255, 0.86);
   box-shadow: var(--shadow);
   padding: 24px;
+}
+
+.empty-editor {
+  max-width: 920px;
+  border: 1px dashed #bfb5aa;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--muted);
+  padding: 28px;
+}
+
+.empty-editor[hidden],
+.editor[hidden] {
+  display: none;
+}
+
+.empty-editor h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.empty-editor p {
+  margin: 0;
+  line-height: 1.7;
 }
 
 .editor-head,

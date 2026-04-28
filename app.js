@@ -2,24 +2,6 @@ const storageKey = "recipe-daybook.v1";
 const workspaceKey = "recipe-daybook.workspace-id";
 const publicWorkspaceId = "00000000-0000-4000-8000-000000000001";
 
-const sampleRecipes = [
-  {
-    id: crypto.randomUUID(),
-    workspace_id: getWorkspaceId(),
-    date: today(),
-    title: "鶏とトマトのしょうが煮",
-    servings: 2,
-    time: "25分",
-    category: "夕食",
-    ingredients: "鶏もも肉 1枚\nトマト 2個\nしょうが 1片\nしょうゆ 大さじ1\nみりん 大さじ1",
-    steps: "1. 鶏肉とトマトを食べやすく切る\n2. 鶏肉を焼き、しょうがを加える\n3. トマトと調味料を入れて10分煮る",
-    notes: "トマトの酸味が強い日は、みりんを少し足す。",
-    favorite: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 const state = {
   recipes: [],
   selectedId: null,
@@ -46,10 +28,12 @@ const els = {
   shareBtn: document.querySelector("#shareBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
   syncBtn: document.querySelector("#syncBtn"),
+  syncPanel: document.querySelector("#syncPanel"),
   syncTitle: document.querySelector("#syncTitle"),
   syncStatus: document.querySelector("#syncStatus"),
   toast: document.querySelector("#toast"),
   heroTitle: document.querySelector("#heroTitle"),
+  emptyEditor: document.querySelector("#emptyEditor"),
   fields: {
     date: document.querySelector("#dateInput"),
     title: document.querySelector("#titleInput"),
@@ -92,7 +76,6 @@ async function init() {
     await loadRemoteRecipes();
   } else {
     state.selectedId = state.selectedId ?? state.recipes[0]?.id ?? null;
-    if (!state.selectedId) createRecipe(false);
     render();
     updateSyncStatus("local");
   }
@@ -160,34 +143,39 @@ async function loadRemoteRecipes() {
   state.remoteReady = true;
   const remoteRecipes = (data || []).map(normalizeRecipe);
   state.lastRemoteCount = remoteRecipes.length;
-  state.recipes = mergeRecipes(remoteRecipes, state.recipes).map((recipe) => ({
+  const recipes = remoteRecipes.length ? remoteRecipes : state.recipes;
+  state.recipes = recipes.filter((recipe) => !isDefaultSampleRecipe(recipe)).map((recipe) => ({
     ...recipe,
     workspace_id: state.workspaceId,
   }));
   saveLocalRecipes();
-  await syncAllLocalRecipes();
-  state.selectedId = state.recipes[0]?.id ?? null;
-  if (!state.selectedId) createRecipe(false);
+  if (!remoteRecipes.length) {
+    const synced = await syncAllLocalRecipes();
+    if (!synced) return;
+  }
+  state.selectedId = null;
   render();
   updateSyncStatus("ready");
 }
 
 async function syncAllLocalRecipes() {
-  if (!state.remoteReady || !state.recipes.length) return;
+  if (!state.remoteReady || !state.recipes.length) return true;
   const { error } = await state.supabase.from("recipes").upsert(state.recipes, { onConflict: "id" });
   if (error) {
     console.error(error);
     updateSyncStatus("error");
     showToast("Supabaseへの同期に失敗しました");
+    return false;
   }
+  return true;
 }
 
 function loadLocalRecipes() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    return Array.isArray(saved) && saved.length ? saved.map(normalizeRecipe) : sampleRecipes;
+    return Array.isArray(saved) ? saved.map(normalizeRecipe).filter((recipe) => !isDefaultSampleRecipe(recipe)) : [];
   } catch {
-    return sampleRecipes;
+    return [];
   }
 }
 
@@ -308,8 +296,8 @@ async function deleteCurrentRecipe() {
 
   state.recipes = state.recipes.filter((item) => item.id !== recipe.id);
   state.selectedId = state.recipes[0]?.id ?? null;
-  if (!state.selectedId) createRecipe(false);
   await removeRemoteRecipe(recipe.id);
+  state.selectedId = null;
   render();
   showToast("削除しました");
 }
@@ -356,7 +344,14 @@ function setFilter(filter) {
 
 function render() {
   const recipe = selectedRecipe();
-  if (!recipe) return;
+  els.form.hidden = !recipe;
+  els.emptyEditor.hidden = Boolean(recipe);
+  if (!recipe) {
+    els.heroTitle.textContent = "レシピ一覧";
+    renderList();
+    return;
+  }
+
   els.fields.date.value = recipe.date || today();
   els.fields.title.value = recipe.title || "";
   els.fields.servings.value = recipe.servings || 2;
@@ -495,6 +490,10 @@ function mergeRecipes(current, incoming) {
   return [...byId.values()];
 }
 
+function isDefaultSampleRecipe(recipe) {
+  return recipe.title === "鶏とトマトのしょうが煮" && recipe.ingredients.includes("鶏もも肉 1枚") && recipe.steps.includes("10分煮る");
+}
+
 function getWorkspaceId() {
   const configId = window.RECIPE_DAYBOOK_SUPABASE?.workspaceId;
   const id = configId || publicWorkspaceId;
@@ -515,6 +514,7 @@ function updateSyncStatus(status) {
   const [title, message] = labels[status];
   els.syncTitle.textContent = title;
   els.syncStatus.textContent = message;
+  els.syncPanel.hidden = status !== "error" && !(status === "local" && state.supabaseProblem);
 }
 
 function today() {
