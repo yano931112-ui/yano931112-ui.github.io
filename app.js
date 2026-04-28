@@ -26,6 +26,7 @@ const state = {
   search: "",
   workspaceId: getWorkspaceId(),
   supabase: createSupabaseClient(),
+  supabaseProblem: getSupabaseProblem(),
   remoteReady: false,
   saving: false,
 };
@@ -119,19 +120,30 @@ function bindEvents() {
 }
 
 function createSupabaseClient() {
+  const problem = getSupabaseProblem();
+  if (problem) return null;
+
+  const config = window.RECIPE_DAYBOOK_SUPABASE;
+  return window.supabase.createClient(config.url, config.publishableKey || config.anonKey);
+}
+
+function getSupabaseProblem() {
+  if (!window.supabase) return "Supabase SDKを読み込めませんでした。ネットワークかCDN読み込みを確認してください。";
+  if (!window.RECIPE_DAYBOOK_SUPABASE) return "supabase-config.jsを読み込めませんでした。GitHub Pagesにこのファイルがあるか確認してください。";
+
   const config = window.RECIPE_DAYBOOK_SUPABASE;
   const url = config?.url;
-  const anonKey = config?.anonKey;
-  const hasPlaceholders = !url || !anonKey || url.includes("YOUR_") || anonKey.includes("YOUR_");
+  const publishableKey = config?.publishableKey || config?.anonKey;
 
-  if (hasPlaceholders || !window.supabase) return null;
-  return window.supabase.createClient(url, anonKey);
+  if (!url || url.includes("YOUR_")) return "supabase-config.jsにProject URLを入れてください。";
+  if (!publishableKey || publishableKey.includes("YOUR_")) return "supabase-config.jsにPublishable keyを入れてください。";
+  return "";
 }
 
 async function loadRemoteRecipes() {
   if (!state.supabase) {
     updateSyncStatus("local");
-    showToast("SupabaseのURLとanon keyを設定してください");
+    showToast(state.supabaseProblem || "Supabase設定を確認してください");
     return;
   }
 
@@ -501,12 +513,13 @@ function getWorkspaceId() {
 }
 
 function updateSyncStatus(status) {
+  const localMessage = state.supabaseProblem || "URLとPublishable keyを入れるまでは、このブラウザだけに保存します。";
   const labels = {
-    local: ["Supabase未設定", "URLとanon keyを入れるまでは、このブラウザだけに保存します。"],
+    local: ["Supabase未設定", localMessage],
     loading: ["読み込み中", "Supabaseからレシピを取得しています。"],
     saving: ["保存中", "Supabaseへ変更を送っています。"],
     ready: ["Supabase接続中", "DBとこのブラウザに保存します。共有リンクで同じレシピ帳を開けます。"],
-    error: ["接続エラー", "テーブル名、RLSポリシー、URL、anon keyを確認してください。"],
+    error: ["接続エラー", "テーブル名、RLSポリシー、URL、Publishable keyを確認してください。"],
   };
   const [title, message] = labels[status];
   els.syncTitle.textContent = title;
