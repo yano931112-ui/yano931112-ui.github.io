@@ -451,6 +451,7 @@ textarea {
 
   .detail-mode .workspace {
     display: block;
+    padding-top: 58px;
   }
 
   .brand {
@@ -506,11 +507,10 @@ textarea {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    position: sticky;
-    top: 10px;
-    left: auto;
+    position: fixed;
+    top: 12px;
+    left: 14px;
     z-index: 5;
-    float: right;
     min-height: 36px;
     border-color: rgba(255, 255, 255, 0.38);
     background: rgba(36, 33, 30, 0.78);
@@ -519,10 +519,7 @@ textarea {
   }
 
   .hero-strip {
-    clear: both;
-    min-height: 96px;
-    margin-bottom: 12px;
-    padding: 18px;
+    display: none;
   }
 
   .hero-plate {
@@ -530,6 +527,8 @@ textarea {
   }
 
   .editor {
+    min-height: calc(100vh - 72px);
+    max-width: none;
     padding: 16px;
     box-shadow: none;
   }
