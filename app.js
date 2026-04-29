@@ -5,6 +5,7 @@ const publicWorkspaceId = "00000000-0000-4000-8000-000000000001";
 const state = {
   recipes: [],
   selectedId: null,
+  mode: "list",
   filter: "all",
   search: "",
   workspaceId: getWorkspaceId(),
@@ -16,9 +17,11 @@ const state = {
 };
 
 const els = {
+  appShell: document.querySelector("#appShell"),
   list: document.querySelector("#recipeList"),
   form: document.querySelector("#recipeForm"),
   newRecipeBtn: document.querySelector("#newRecipeBtn"),
+  backToListBtn: document.querySelector("#backToListBtn"),
   exportBtn: document.querySelector("#exportBtn"),
   importInput: document.querySelector("#importInput"),
   searchInput: document.querySelector("#searchInput"),
@@ -83,6 +86,7 @@ async function init() {
 
 function bindEvents() {
   els.newRecipeBtn.addEventListener("click", () => createRecipe(true));
+  els.backToListBtn.addEventListener("click", showList);
   els.form.addEventListener("submit", saveCurrentRecipe);
   els.favoriteBtn.addEventListener("click", toggleFavorite);
   els.shareBtn.addEventListener("click", shareCurrentRecipe);
@@ -154,6 +158,7 @@ async function loadRemoteRecipes() {
     if (!synced) return;
   }
   state.selectedId = null;
+  state.mode = "list";
   render();
   updateSyncStatus("ready");
 }
@@ -235,6 +240,7 @@ function createRecipe(shouldRender) {
   };
   state.recipes.unshift(recipe);
   state.selectedId = recipe.id;
+  state.mode = "detail";
   saveLocalRecipes();
   if (shouldRender) {
     render();
@@ -298,6 +304,7 @@ async function deleteCurrentRecipe() {
   state.selectedId = state.recipes[0]?.id ?? null;
   await removeRemoteRecipe(recipe.id);
   state.selectedId = null;
+  state.mode = "list";
   render();
   showToast("削除しました");
 }
@@ -344,6 +351,8 @@ function setFilter(filter) {
 
 function render() {
   const recipe = selectedRecipe();
+  els.appShell.classList.toggle("list-mode", state.mode === "list");
+  els.appShell.classList.toggle("detail-mode", state.mode === "detail");
   els.form.hidden = !recipe;
   els.emptyEditor.hidden = Boolean(recipe);
   if (!recipe) {
@@ -405,6 +414,13 @@ async function selectRecipe(id) {
     await persistRecipe(current);
   }
   state.selectedId = id;
+  state.mode = "detail";
+  render();
+}
+
+function showList() {
+  state.selectedId = null;
+  state.mode = "list";
   render();
 }
 

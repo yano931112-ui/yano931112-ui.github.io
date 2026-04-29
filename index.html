@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell list-mode" id="appShell">
       <aside class="sidebar" aria-label="レシピ一覧">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">R</div>
@@ -49,6 +49,8 @@
       </aside>
 
       <main class="workspace">
+        <button class="back-button" id="backToListBtn" type="button">一覧へ</button>
+
         <section class="hero-strip" aria-label="今日の記録">
           <div>
             <p class="eyebrow">Daily recipe journal</p>

@@ -246,8 +246,13 @@ button:hover,
 }
 
 .workspace {
+  position: relative;
   padding: 32px;
   overflow-y: auto;
+}
+
+.back-button {
+  display: none;
 }
 
 .hero-strip {
@@ -420,22 +425,104 @@ textarea {
 
 @media (max-width: 820px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    display: block;
+    min-height: 100vh;
   }
 
   .sidebar {
+    min-height: 100vh;
     border-right: 0;
-    border-bottom: 1px solid rgba(91, 78, 66, 0.16);
-    max-height: 48vh;
-  }
-
-  .workspace {
+    border-bottom: 0;
     padding: 18px;
   }
 
+  .workspace {
+    min-height: 100vh;
+    padding: 14px;
+  }
+
+  .list-mode .workspace {
+    display: none;
+  }
+
+  .detail-mode .sidebar {
+    display: none;
+  }
+
+  .detail-mode .workspace {
+    display: block;
+  }
+
+  .brand {
+    margin-bottom: 16px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+    font-size: 23px;
+  }
+
+  .brand h1 {
+    font-size: 20px;
+  }
+
+  .toolbar {
+    grid-template-columns: 1.2fr 1fr 1fr;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(14px);
+    margin: 0 -18px 14px;
+    padding: 10px 18px;
+  }
+
+  .search {
+    margin-top: 10px;
+  }
+
+  .recipe-list {
+    gap: 10px;
+  }
+
+  .recipe-card {
+    min-height: 74px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  .recipe-card strong {
+    font-size: 17px;
+    white-space: normal;
+  }
+
+  .recipe-card.active {
+    border-color: var(--line);
+    box-shadow: none;
+  }
+
+  .back-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: sticky;
+    top: 10px;
+    left: auto;
+    z-index: 5;
+    float: right;
+    min-height: 36px;
+    border-color: rgba(255, 255, 255, 0.38);
+    background: rgba(36, 33, 30, 0.78);
+    color: white;
+    padding: 0 12px;
+  }
+
   .hero-strip {
-    min-height: 118px;
-    padding: 20px;
+    clear: both;
+    min-height: 96px;
+    margin-bottom: 12px;
+    padding: 18px;
   }
 
   .hero-plate {
@@ -444,6 +531,7 @@ textarea {
 
   .editor {
     padding: 16px;
+    box-shadow: none;
   }
 
   .field-grid {
