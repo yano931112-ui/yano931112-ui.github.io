@@ -266,6 +266,8 @@ async function saveCurrentRecipe(event) {
 
   const saved = await saveRecipeEdits(recipe);
   if (!saved) return;
+  state.selectedId = null;
+  state.mode = "list";
   render();
   showToast(state.remoteReady ? "Supabaseに保存しました" : "このブラウザに保存しました");
 }
