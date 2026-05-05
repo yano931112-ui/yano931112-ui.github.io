@@ -1,6 +1,7 @@
 const storageKey = "recipe-daybook.v1";
 const workspaceKey = "recipe-daybook.workspace-id";
 const publicWorkspaceId = "00000000-0000-4000-8000-000000000001";
+const photoBucket = "recipe-photos";
 
 const state = {
   recipes: [],
@@ -14,6 +15,9 @@ const state = {
   remoteReady: false,
   saving: false,
   lastRemoteCount: 0,
+  pendingPhotoFile: null,
+  pendingPhotoUrl: "",
+  removePhoto: false,
 };
 
 const els = {
@@ -24,6 +28,10 @@ const els = {
   backToListBtn: document.querySelector("#backToListBtn"),
   exportBtn: document.querySelector("#exportBtn"),
   importInput: document.querySelector("#importInput"),
+  photoInput: document.querySelector("#photoInput"),
+  removePhotoBtn: document.querySelector("#removePhotoBtn"),
+  photoPreviewImg: document.querySelector("#photoPreviewImg"),
+  photoPlaceholder: document.querySelector("#photoPlaceholder"),
   searchInput: document.querySelector("#searchInput"),
   allFilter: document.querySelector("#allFilter"),
   favoriteFilter: document.querySelector("#favoriteFilter"),
@@ -93,6 +101,8 @@ function bindEvents() {
   els.deleteBtn.addEventListener("click", deleteCurrentRecipe);
   els.exportBtn.addEventListener("click", exportRecipes);
   els.importInput.addEventListener("change", importRecipes);
+  els.photoInput.addEventListener("change", previewSelectedPhoto);
+  els.removePhotoBtn.addEventListener("click", markPhotoForRemoval);
   els.syncBtn.addEventListener("click", loadRemoteRecipes);
   els.searchInput.addEventListener("input", (event) => {
     state.search = event.target.value.trim().toLowerCase();
@@ -165,7 +175,7 @@ async function loadRemoteRecipes() {
 
 async function syncAllLocalRecipes() {
   if (!state.remoteReady || !state.recipes.length) return true;
-  const { error } = await state.supabase.from("recipes").upsert(state.recipes, { onConflict: "id" });
+  const { error } = await state.supabase.from("recipes").upsert(state.recipes.map(toDatabaseRecipe), { onConflict: "id" });
   if (error) {
     console.error(error);
     updateSyncStatus("error");
@@ -194,7 +204,7 @@ async function persistRecipe(recipe) {
 
   state.saving = true;
   updateSyncStatus("saving");
-  const { error } = await state.supabase.from("recipes").upsert(recipe, { onConflict: "id" });
+  const { error } = await state.supabase.from("recipes").upsert(toDatabaseRecipe(recipe), { onConflict: "id" });
   state.saving = false;
 
   if (error) {
@@ -234,6 +244,7 @@ function createRecipe(shouldRender) {
     ingredients: "",
     steps: "",
     notes: "",
+    photo_path: "",
     favorite: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -253,11 +264,8 @@ async function saveCurrentRecipe(event) {
   const recipe = selectedRecipe();
   if (!recipe) return;
 
-  Object.assign(recipe, formData(), {
-    workspace_id: state.workspaceId,
-    updated_at: new Date().toISOString(),
-  });
-  await persistRecipe(recipe);
+  const saved = await saveRecipeEdits(recipe);
+  if (!saved) return;
   render();
   showToast(state.remoteReady ? "Supabaseに保存しました" : "このブラウザに保存しました");
 }
@@ -274,8 +282,8 @@ async function toggleFavorite() {
 async function shareCurrentRecipe() {
   const recipe = selectedRecipe();
   if (!recipe) return;
-  Object.assign(recipe, formData(), { updated_at: new Date().toISOString() });
-  await persistRecipe(recipe);
+  const saved = await saveRecipeEdits(recipe);
+  if (!saved) return;
 
   const shareUrl = makeShareUrl(recipe);
   const text = `${recipe.title || "無題のレシピ"}\n${shareUrl}`;
@@ -302,6 +310,7 @@ async function deleteCurrentRecipe() {
 
   state.recipes = state.recipes.filter((item) => item.id !== recipe.id);
   state.selectedId = state.recipes[0]?.id ?? null;
+  await removePhotoFile(recipe.photo_path);
   await removeRemoteRecipe(recipe.id);
   state.selectedId = null;
   state.mode = "list";
@@ -369,6 +378,7 @@ function render() {
   els.fields.ingredients.value = recipe.ingredients || "";
   els.fields.steps.value = recipe.steps || "";
   els.fields.notes.value = recipe.notes || "";
+  setPhotoPreview(state.pendingPhotoUrl || photoUrl(recipe.photo_path));
   els.favoriteBtn.setAttribute("aria-pressed", String(Boolean(recipe.favorite)));
   els.favoriteBtn.querySelector("span").textContent = recipe.favorite ? "★" : "☆";
   els.heroTitle.textContent = recipe.title ? recipe.title : "今日のレシピを残す";
@@ -391,12 +401,16 @@ function renderList() {
     const item = document.createElement("li");
     item.className = `recipe-card${recipe.id === state.selectedId ? " active" : ""}`;
     item.tabIndex = 0;
+    const thumbnail = photoUrl(recipe.photo_path);
     item.innerHTML = `
-      <strong>${escapeHtml(recipe.title || "無題のレシピ")}</strong>
-      <div class="recipe-meta">
-        <span>${escapeHtml(formatDate(recipe.date))}</span>
-        <span>${escapeHtml(recipe.category || "その他")}</span>
-        ${recipe.favorite ? "<span>★</span>" : ""}
+      ${thumbnail ? `<img class="recipe-thumb" src="${escapeHtml(thumbnail)}" alt="" />` : ""}
+      <div class="recipe-card-body">
+        <strong>${escapeHtml(recipe.title || "無題のレシピ")}</strong>
+        <div class="recipe-meta">
+          <span>${escapeHtml(formatDate(recipe.date))}</span>
+          <span>${escapeHtml(recipe.category || "その他")}</span>
+          ${recipe.favorite ? "<span>★</span>" : ""}
+        </div>
       </div>
     `;
     item.addEventListener("click", () => selectRecipe(recipe.id));
@@ -410,11 +424,12 @@ function renderList() {
 async function selectRecipe(id) {
   const current = selectedRecipe();
   if (current) {
-    Object.assign(current, formData(), { updated_at: new Date().toISOString() });
-    await persistRecipe(current);
+    const saved = await saveRecipeEdits(current);
+    if (!saved) return;
   }
   state.selectedId = id;
   state.mode = "detail";
+  clearPendingPhoto();
   render();
 }
 
@@ -454,6 +469,161 @@ function formData() {
   };
 }
 
+async function saveRecipeEdits(recipe) {
+  const previousPhotoPath = recipe.photo_path || "";
+  Object.assign(recipe, formData(), {
+    workspace_id: state.workspaceId,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (state.removePhoto) {
+    recipe.photo_path = "";
+  }
+
+  if (state.pendingPhotoFile) {
+    const uploadedPath = await uploadRecipePhoto(recipe);
+    if (!uploadedPath) return false;
+    recipe.photo_path = uploadedPath;
+  }
+
+  await persistRecipe(recipe);
+
+  if (state.remoteReady && previousPhotoPath && previousPhotoPath !== recipe.photo_path) {
+    await removePhotoFile(previousPhotoPath);
+  }
+
+  clearPendingPhoto();
+  return true;
+}
+
+function previewSelectedPhoto(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    showToast("画像ファイルを選んでください");
+    event.target.value = "";
+    return;
+  }
+
+  if (state.pendingPhotoUrl) URL.revokeObjectURL(state.pendingPhotoUrl);
+  state.pendingPhotoFile = file;
+  state.pendingPhotoUrl = URL.createObjectURL(file);
+  state.removePhoto = false;
+  setPhotoPreview(state.pendingPhotoUrl);
+}
+
+function markPhotoForRemoval() {
+  const recipe = selectedRecipe();
+  if (!recipe) return;
+  recipe.photo_path = "";
+  state.pendingPhotoFile = null;
+  state.removePhoto = true;
+  els.photoInput.value = "";
+  setPhotoPreview("");
+}
+
+function clearPendingPhoto() {
+  if (state.pendingPhotoUrl) URL.revokeObjectURL(state.pendingPhotoUrl);
+  state.pendingPhotoFile = null;
+  state.pendingPhotoUrl = "";
+  state.removePhoto = false;
+  els.photoInput.value = "";
+}
+
+async function uploadRecipePhoto(recipe) {
+  if (!state.remoteReady) {
+    showToast("写真保存にはSupabase接続が必要です");
+    return "";
+  }
+
+  try {
+    const blob = await compressImage(state.pendingPhotoFile);
+    const path = `${state.workspaceId}/${recipe.id}/${Date.now()}.webp`;
+    const { error } = await state.supabase.storage.from(photoBucket).upload(path, blob, {
+      contentType: "image/webp",
+      upsert: true,
+    });
+
+    if (error) throw error;
+    return path;
+  } catch (error) {
+    console.error(error);
+    updateSyncStatus("error");
+    showToast("写真のアップロードに失敗しました");
+    return "";
+  }
+}
+
+async function removePhotoFile(path) {
+  if (!path || !state.remoteReady) return;
+  const { error } = await state.supabase.storage.from(photoBucket).remove([path]);
+  if (error) console.warn(error);
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxSize = 1400;
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(image.width * scale);
+      canvas.height = Math.round(image.height * scale);
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error("画像を圧縮できませんでした"))),
+        "image/webp",
+        0.82,
+      );
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("画像を読み込めませんでした"));
+    };
+    image.src = url;
+  });
+}
+
+function photoUrl(path) {
+  if (!path || !state.supabase) return "";
+  const { data } = state.supabase.storage.from(photoBucket).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+function setPhotoPreview(url) {
+  els.photoPreviewImg.hidden = !url;
+  els.photoPlaceholder.hidden = Boolean(url);
+  els.removePhotoBtn.hidden = !url;
+  if (url) {
+    els.photoPreviewImg.src = url;
+  } else {
+    els.photoPreviewImg.removeAttribute("src");
+  }
+}
+
+function toDatabaseRecipe(recipe) {
+  return {
+    id: recipe.id,
+    workspace_id: recipe.workspace_id,
+    date: recipe.date,
+    title: recipe.title,
+    servings: recipe.servings,
+    time: recipe.time,
+    category: recipe.category,
+    ingredients: recipe.ingredients,
+    steps: recipe.steps,
+    notes: recipe.notes,
+    photo_path: recipe.photo_path || "",
+    favorite: recipe.favorite,
+    created_at: recipe.created_at,
+    updated_at: recipe.updated_at,
+  };
+}
+
 function makeShareUrl(recipe) {
   if (state.remoteReady) {
     return `${location.origin}${location.pathname}`;
@@ -489,6 +659,7 @@ function normalizeRecipe(recipe) {
     ingredients: recipe.ingredients || "",
     steps: recipe.steps || "",
     notes: recipe.notes || "",
+    photo_path: recipe.photo_path || "",
     favorite: Boolean(recipe.favorite),
     created_at: createdAt,
     updated_at: updatedAt,

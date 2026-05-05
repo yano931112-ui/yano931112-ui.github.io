@@ -84,6 +84,20 @@
             <input id="titleInput" name="title" type="text" placeholder="例：鶏とトマトのしょうが煮" required />
           </label>
 
+          <section class="photo-field" aria-label="レシピ写真">
+            <div class="photo-preview" id="photoPreview">
+              <img id="photoPreviewImg" alt="レシピ写真のプレビュー" hidden />
+              <span id="photoPlaceholder">写真を追加</span>
+            </div>
+            <div class="photo-actions">
+              <label class="photo-button">
+                写真を選択
+                <input id="photoInput" type="file" accept="image/*" />
+              </label>
+              <button id="removePhotoBtn" type="button">写真を削除</button>
+            </div>
+          </section>
+
           <div class="field-grid">
             <label class="field">
               <span>人数</span>

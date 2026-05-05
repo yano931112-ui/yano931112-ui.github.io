@@ -217,11 +217,26 @@ button:hover,
 }
 
 .recipe-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.84);
   cursor: pointer;
   padding: 12px;
+}
+
+.recipe-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.recipe-card-body {
+  min-width: 0;
 }
 
 .recipe-card.active {
@@ -370,6 +385,51 @@ button:hover,
 .title-field input {
   font-size: 24px;
   font-weight: 700;
+}
+
+.photo-field {
+  display: grid;
+  gap: 10px;
+}
+
+.photo-preview {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px dashed #bfb5aa;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
+}
+
+.photo-preview img {
+  width: 100%;
+  height: 100%;
+  max-height: 420px;
+  object-fit: cover;
+}
+
+.photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-button {
+  display: grid;
+  place-items: center;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0 14px;
+}
+
+.photo-button input {
+  display: none;
 }
 
 .field-grid {
